@@ -47,40 +47,9 @@ app.get('/', (req, res) => {
   });
 });
 
-// Routes with error handling
-try {
-  const authRoutes = await import('./routes/auth.js');
-  app.use('/api/auth', authRoutes.default);
-  console.log('Auth routes loaded successfully');
-} catch (error) {
-  console.error('Failed to load auth routes:', error.message);
-  
-  // Fallback routes
-  app.use('/api/auth/*', (req, res) => {
-    res.status(500).json({ 
-      success: false, 
-      message: 'Auth service temporarily unavailable',
-      error: error.message
-    });
-  });
-}
-
-// Error handling
-app.use((err, req, res, next) => {
-  console.error('Server error:', err);
-  res.status(500).json({
-    success: false,
-    message: 'Internal server error'
-  });
-});
-
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
-    success: false,
-    message: `Route ${req.originalUrl} not found`
-  });
-});
+// Routes
+import authRoutes from './routes/auth.js';
+app.use('/api/auth', authRoutes);
 
 // For local development only
 const PORT = process.env.PORT || 5000;
