@@ -1,27 +1,20 @@
+
+
 import axios from 'axios';
 import qs from 'qs';
-import fs from 'fs';
 
 class ZohoService {
   constructor() {
     this.baseURL = 'https://www.zohoapis.in/crm/v2';
     this.authURL = 'https://accounts.zoho.in/oauth/v2';
     this.accessToken = null;
-    this.refreshToken = process.env.ZOHO_REFRESH_TOKEN; // Initial load
-    console.log('Initial Loaded Refresh Token from .env:', this.refreshToken); // Debug initial load
-    this.loadEnv(); // Force reload env vars
+    this.refreshToken = process.env.ZOHO_REFRESH_TOKEN; // This will work in Vercel
+    console.log('Initial Loaded Refresh Token from .env:', this.refreshToken);
   }
 
-  // Load environment variables dynamically
-  loadEnv() {
-    const envContent = fs.readFileSync('.env', 'utf8');
-    const envLines = envContent.split('\n').reduce((acc, line) => {
-      const [key, value] = line.split('=').map(s => s.trim());
-      if (key && value) acc[key] = value;
-      return acc;
-    }, {});
-    this.refreshToken = envLines.ZOHO_REFRESH_TOKEN || this.refreshToken;
-    console.log('Reloaded Refresh Token:', this.refreshToken); // Debug reload
+  // Get refresh token dynamically (handles cases where env loads after constructor)
+  getRefreshToken() {
+    return this.refreshToken || process.env.ZOHO_REFRESH_TOKEN;
   }
 
   // Step 1: Get authorization URL (run this once to get initial tokens)
@@ -64,18 +57,10 @@ class ZohoService {
       this.accessToken = response.data.access_token;
       this.refreshToken = response.data.refresh_token;
 
-      // Auto-update .env with new refresh token (backup .env first!)
-      const envContent = fs.readFileSync('.env', 'utf8');
-      const updatedEnv = envContent.replace(
-        /^ZOHO_REFRESH_TOKEN=.*/m,
-        `ZOHO_REFRESH_TOKEN=${this.refreshToken}`
-      ) || `${envContent}\nZOHO_REFRESH_TOKEN=${this.refreshToken}`;
-      fs.writeFileSync('.env', updatedEnv, 'utf8');
-      console.log('🔧 Refresh token updated in .env');
-      this.loadEnv(); // Reload after update
-
+      // NOTE: In Vercel, you need to manually update environment variables
+      // Copy this refresh token and add it to Vercel Environment Variables
       console.log('🎉 Access Token:', this.accessToken);
-      console.log('🎉 Refresh Token:', this.refreshToken);
+      console.log('🎉 NEW REFRESH TOKEN - ADD THIS TO VERCEL ENV VARS:', this.refreshToken);
 
       return response.data;
     } catch (error) {
@@ -90,13 +75,14 @@ class ZohoService {
 
   // Step 3: Refresh access token when expired
   async refreshAccessToken() {
-    if (!this.refreshToken) {
-      throw new Error('No refresh token available');
+    const refreshToken = this.getRefreshToken();
+    if (!refreshToken) {
+      throw new Error('No refresh token available. Please check ZOHO_REFRESH_TOKEN environment variable.');
     }
-    console.log('Refreshing token with:', this.refreshToken); // Debug
+    console.log('Refreshing token with:', refreshToken); // Debug
     try {
       const response = await axios.post(`${this.authURL}/token`, qs.stringify({
-        refresh_token: this.refreshToken,
+        refresh_token: refreshToken,
         client_id: process.env.ZOHO_CLIENT_ID,
         client_secret: process.env.ZOHO_CLIENT_SECRET,
         grant_type: 'refresh_token'
@@ -105,6 +91,9 @@ class ZohoService {
       });
 
       this.accessToken = response.data.access_token;
+      // Update the stored refresh token in case it changed
+      this.refreshToken = refreshToken;
+      console.log('✅ Token refreshed successfully');
       return response.data;
     } catch (error) {
       console.error('Error refreshing token:', error.response?.data || error.message);
@@ -124,15 +113,22 @@ async makeAPICall(method, endpoint, data = null) {
         'Content-Type': 'application/json'
       }
     });
-    console.log('API Response Data:', response.data); // Add this
+    console.log('API Response Data:', response.data);
     return response;
   };
 
   try {
+    // If no access token, refresh first
+    if (!this.accessToken) {
+      console.log('No access token found, refreshing...');
+      await this.refreshAccessToken();
+    }
+    
     return await makeRequest();
   } catch (error) {
     console.error('API Call Error:', error.response?.data || error.message);
-    if (error.response?.status === 401) {
+    if (error.response?.status === 401 || error.response?.data?.code === 'INVALID_TOKEN') {
+      console.log('Token invalid, refreshing and retrying...');
       await this.refreshAccessToken();
       return await makeRequest();
     }
